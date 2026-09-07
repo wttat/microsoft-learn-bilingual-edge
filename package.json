@@ -1,0 +1,13 @@
+{
+  "name": "learn-bilingual-edge",
+  "version": "1.0.3",
+  "private": true,
+  "description": "Microsoft Learn 官方中英文对照 Edge 插件，无构建依赖",
+  "scripts": {
+    "test": "node --test tests/core.test.cjs tests/background.test.cjs",
+    "test:browser": "node --test tests/browser.test.cjs tests/training.test.cjs tests/navigation.test.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
