@@ -49,6 +49,65 @@
     return { main, title, bodies };
   }
 
+  function navigationLink(element, current) {
+    const href = element.getAttribute("href");
+    if (!href || href.startsWith("#")) return null;
+    let url;
+    try {
+      url = Core.normalizeURL(new URL(href, current).href);
+    } catch (error) {
+      if (error instanceof TypeError || ["INVALID_URL", "NOT_ARTICLE_URL"].includes(error.code)) return null;
+      throw error;
+    }
+    if (Core.localeOf(url.href) !== Core.localeOf(current.href)) return null;
+    for (const key of ["view", "viewFallbackFrom", "preserve-view"]) {
+      if (!url.searchParams.has(key) && current.searchParams.has(key)) {
+        url.searchParams.set(key, current.searchParams.get(key));
+      }
+    }
+    return {
+      url: url.href,
+      title: (element.getAttribute("title") || element.querySelector("span")?.textContent || element.textContent).trim()
+    };
+  }
+
+  function pageNavigation(doc, currentURL) {
+    const current = Core.normalizeURL(currentURL);
+    const result = {
+      previous: null, next: null,
+      previousReason: "此页未提供官方上一页链接",
+      nextReason: "此页未提供官方下一页链接"
+    };
+    if (meta(doc, "schema").toLowerCase() === "moduleunit") {
+      const parent = current.pathname.slice(0, current.pathname.lastIndexOf("/") + 1);
+      const seen = new Set();
+      const units = [...doc.querySelectorAll("#module-menu a[href]")].map(link => navigationLink(link, current))
+        .filter(link => {
+          if (!link) return false;
+          const pathname = new URL(link.url).pathname;
+          if (pathname.slice(0, pathname.lastIndexOf("/") + 1) !== parent || seen.has(pathname)) return false;
+          seen.add(pathname);
+          return true;
+        });
+      const index = units.findIndex(link => new URL(link.url).pathname === current.pathname);
+      if (index < 0) {
+        result.previousReason = result.nextReason = "官方单元目录尚未就绪或未包含当前页";
+      } else {
+        result.previous = units[index - 1] || null;
+        result.next = units[index + 1] || null;
+        result.previousReason = "已经是本模块第一页";
+        result.nextReason = "已经是本模块最后一页";
+      }
+      return result;
+    }
+    for (const [direction, rel] of [["previous", "prev"], ["next", "next"]]) {
+      result[direction] = [...doc.querySelectorAll(`head link[rel~="${rel}"][href], main a[rel~="${rel}"][href]`)]
+        .map(link => navigationLink(link, current))
+        .find(link => link && new URL(link.url).pathname !== current.pathname) || null;
+    }
+    return result;
+  }
+
   function sanitizeNode(node, output, baseURL, view = "") {
     if (node.nodeType === 3) return output.createTextNode(node.textContent);
     if (node.nodeType !== 1) return null;
@@ -168,5 +227,5 @@
     };
   }
 
-  root.LearnBilingualArticle = { articleParts, extractArticle, sanitizeNode };
+  root.LearnBilingualArticle = { articleParts, pageNavigation, extractArticle, sanitizeNode };
 })(globalThis);

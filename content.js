@@ -18,6 +18,8 @@
   let savedPage;
   let ready = false;
   let autoAttempted = false;
+  let resumeRequested = false;
+  let navigating = false;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -50,6 +52,20 @@
     dialog.setAttribute("aria-label", "Microsoft Learn 官方中英文对照阅读器");
     const toolbar = element("div", "toolbar");
     toolbar.append(element("strong", "", "Learn 官方中英对照"));
+    const pageButtons = {};
+    const pageNavigation = element("div", "page-navigation");
+    pageNavigation.setAttribute("role", "group");
+    pageNavigation.setAttribute("aria-label", "文章导航");
+    for (const [direction, label] of [["previous", "上一页"], ["next", "下一页"]]) {
+      const button = element("button", "", label);
+      button.dataset.action = direction;
+      button.disabled = true;
+      button.title = "正在读取官方导航";
+      button.addEventListener("click", () => navigatePage(direction));
+      pageButtons[direction] = button;
+      pageNavigation.append(button);
+    }
+    toolbar.append(pageNavigation);
     const syncInput = checkbox("同步滚动", settings.sync, async value => {
       settings.sync = value;
       sync?.setEnabled(value);
@@ -111,7 +127,7 @@
     shadow.append(stylesheet, launcher, dialog);
     document.documentElement.append(host);
     ui = {
-      host, shadow, dialog, launcher, close, notice, status: message, panes, columns, swap, syncInput, autoInput,
+      host, shadow, dialog, launcher, close, notice, status: message, panes, columns, swap, syncInput, autoInput, pageButtons,
       stylesReady: false, stylesFailed: false, wantsOpen: false
     };
     applyColumnOrder();
@@ -163,6 +179,70 @@
     }
   }
 
+  function updateNavigation() {
+    if (!opened) return;
+    if (!canRead()) {
+      for (const button of Object.values(ui.pageButtons)) {
+        button.disabled = true;
+        button.title = "当前页面正文尚未就绪";
+      }
+      return;
+    }
+    const navigation = Article.pageNavigation(document, location.href);
+    for (const [direction, label] of [["previous", "上一页"], ["next", "下一页"]]) {
+      const button = ui.pageButtons[direction];
+      const target = navigation[direction];
+      button.disabled = navigating || !target;
+      button.title = navigating ? "正在切换页面" : target ? `${label}：${target.title || "打开官方页面"}` : navigation[`${direction}Reason`];
+    }
+  }
+
+  async function navigatePage(direction) {
+    if (!opened || navigating) return;
+    try {
+      const source = Core.pageKey(location.href);
+      const navigation = Article.pageNavigation(document, location.href);
+      const target = navigation[direction];
+      if (!target) {
+        status(navigation[`${direction}Reason`]);
+        return;
+      }
+      navigating = true;
+      updateNavigation();
+      status(`正在打开${direction === "previous" ? "上一页" : "下一页"}…`);
+      const response = await chrome.runtime.sendMessage({
+        type: "navigation-state", url: location.href, requestId: crypto.randomUUID(), destination: target.url
+      });
+      if (!response?.ok) throw Core.fail("NAVIGATION", response?.message || "扩展后台未响应，请重试。");
+      if (Core.pageKey(location.href) !== source) {
+        watchPage();
+        return;
+      }
+      cancelRequest();
+      location.assign(target.url);
+    } catch (error) {
+      console.error("Learn 中英对照：切换页面失败", error);
+      status(error.code ? error.message : "切换页面失败，请重试或在官方原文中继续。");
+    } finally {
+      navigating = false;
+      updateNavigation();
+    }
+  }
+
+  async function resumeNavigation() {
+    try {
+      Core.normalizeURL(location.href);
+    } catch (error) {
+      if (["INVALID_URL", "NOT_ARTICLE_URL"].includes(error.code)) return false;
+      throw error;
+    }
+    const response = await chrome.runtime.sendMessage({
+      type: "navigation-state", url: location.href, requestId: crypto.randomUUID()
+    });
+    if (!response?.ok) throw Core.fail("NAVIGATION", response?.message || "扩展后台未响应，请刷新页面。");
+    return response.resume === true;
+  }
+
   function canRead() {
     try {
       Core.normalizeURL(location.href);
@@ -209,6 +289,7 @@
     ui.launcher.hidden = true;
     ui.dialog.showModal();
     opened = true;
+    updateNavigation();
     ui.panes[settings.swapped ? 1 : 0].pane.focus({ preventScroll: true });
     if (!loaded) loadPair();
     else connectSync();
@@ -389,6 +470,7 @@
       loaded = false;
       eligible = false;
       autoAttempted = false;
+      resumeRequested = false;
       if (ui) ui.launcher.hidden = true;
     }
     if (!eligible) eligible = canRead();
@@ -396,11 +478,13 @@
       autoAttempted = true;
       makeUI();
       ui.launcher.hidden = opened;
-      if (settings.auto) openReader();
+      if (settings.auto || resumeRequested) openReader();
+      resumeRequested = false;
     }
+    updateNavigation();
   }
 
-  chrome.storage.local.get(defaults).then(values => {
+  chrome.storage.local.get(defaults).then(async values => {
     settings = { sync: values.sync !== false, auto: values.auto !== false, swapped: values.swapped === true };
     if (ui) {
       ui.syncInput.input.checked = settings.sync;
@@ -408,13 +492,15 @@
       applyColumnOrder();
       sync?.setEnabled(settings.sync);
     }
+    resumeRequested = await resumeNavigation();
   }).catch(error => {
-    console.error("Learn 中英对照：设置读取失败，使用默认设置", error);
+    console.error("Learn 中英对照：设置或阅读状态读取失败", error);
     makeUI();
-    ui.notice.textContent = "设置读取失败，已使用默认设置；请重新加载扩展。";
+    ui.notice.textContent = "设置或阅读状态读取失败，请重新加载扩展。";
     ui.notice.hidden = false;
   }).finally(() => {
     ready = true;
+    if (resumeRequested) openReader();
     watchPage();
   });
   window.setInterval(watchPage, 750);

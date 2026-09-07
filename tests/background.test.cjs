@@ -10,14 +10,31 @@ const PAGE = "https://learn.microsoft.com/en-us/azure/storage/common/storage-acc
 
 function harness(fetcher, timers = {}) {
   let listener;
+  let onRemoved;
   const warnings = [];
+  const session = new Map();
+  const storage = {
+    async get(key) {
+      if (timers.storageFailure) throw new Error("storage unavailable");
+      return { [key]: session.get(key) };
+    },
+    async set(values) {
+      if (timers.storageFailure) throw new Error("storage unavailable");
+      for (const [key, value] of Object.entries(values)) session.set(key, value);
+    },
+    async remove(key) {
+      if (timers.storageFailure) throw new Error("storage unavailable");
+      session.delete(key);
+    }
+  };
   vm.runInNewContext(code, {
     importScripts() {}, LearnBilingualCore: Core, fetch: fetcher, AbortController, TextDecoder,
     setTimeout: timers.setTimeout || setTimeout, clearTimeout: timers.clearTimeout || clearTimeout,
     console: { warn: (...args) => warnings.push(args), error: (...args) => warnings.push(args) },
     chrome: {
       runtime: { id: "test-extension", onMessage: { addListener(fn) { listener = fn; } } },
-      tabs: { onRemoved: { addListener() {} } },
+      storage: { session: storage },
+      tabs: { onRemoved: { addListener(fn) { onRemoved = fn; } } },
       action: { onClicked: { addListener() {} } }
     }
   });
@@ -27,7 +44,7 @@ function harness(fetcher, timers = {}) {
       { id: "test-extension", tab: { id: 7, url: PAGE }, frameId: 0, url: PAGE, ...senderOverrides }, resolve
     ));
   }
-  return { message, warnings };
+  return { message, warnings, session, removeTab: tabId => onRemoved(tabId) };
 }
 
 function htmlResponse(url, status = 200) {
@@ -168,4 +185,59 @@ test("切换单元后可取消旧地址的请求，但必须匹配请求 ID 和�
   assert.equal(wrongURL.cancelled, false);
   assert.equal(cancelled.cancelled, true);
   assert.equal(result.results["zh-cn"].code, "CANCELLED");
+});
+
+test("阅读模式按标签页保存，目标页只恢复一次且不触发正文请求", async () => {
+  let calls = 0;
+  const worker = harness(async url => { calls++; return htmlResponse(url); });
+  const destination = "https://learn.microsoft.com/en-us/training/modules/example/next?view=test#section";
+  const prepare = await worker.message({ type: "navigation-state", destination });
+  assert.equal(prepare.ok, true);
+  assert.equal(worker.session.get("reader-navigation:7").url, destination.split("#")[0]);
+  assert.equal((await worker.message({ type: "navigation-state" }, { tab: { id: 8, url: PAGE } })).resume, false);
+  assert.ok(worker.session.has("reader-navigation:7"));
+  const resume = () => worker.message(
+    { type: "navigation-state", url: destination },
+    { url: destination, tab: { id: 7, url: destination } }
+  );
+  assert.equal((await resume()).resume, true);
+  assert.equal((await resume()).resume, false);
+  assert.equal(worker.session.size, 0);
+  assert.equal(calls, 0);
+});
+
+test("过期或不匹配的跳转状态不会自动打开其他页，关闭标签页清理状态", async () => {
+  const worker = harness(async url => htmlResponse(url));
+  const destination = "https://learn.microsoft.com/en-us/training/modules/example/next";
+  await worker.message({ type: "navigation-state", destination });
+  assert.equal((await worker.message({ type: "navigation-state" })).resume, false);
+  assert.equal(worker.session.size, 0);
+  worker.session.set("reader-navigation:7", { url: Core.pageKey(PAGE), expires: 0 });
+  assert.equal((await worker.message({ type: "navigation-state" })).resume, false);
+  assert.equal(worker.session.size, 0);
+  await worker.message({ type: "navigation-state", destination });
+  worker.session.set("reader-navigation:8", { url: destination, expires: Date.now() + 60000 });
+  worker.removeTab(7);
+  assert.equal(worker.session.has("reader-navigation:7"), false);
+  assert.equal(worker.session.has("reader-navigation:8"), true);
+});
+
+test("拒绝非法跳转目标和来源，不把存储故障当作跳转成功", async () => {
+  const worker = harness(async url => htmlResponse(url));
+  for (const destination of [
+    PAGE, "javascript:alert(1)", "https://evil.test/en-us/next",
+    "https://learn.microsoft.com/zh-cn/next", "https://learn.microsoft.com/en-us/"
+  ]) assert.equal((await worker.message({ type: "navigation-state", destination })).ok, false);
+  const destination = "https://learn.microsoft.com/en-us/training/modules/example/next";
+  assert.equal((await worker.message({ type: "navigation-state", destination }, { frameId: 1 })).ok, false);
+  assert.equal((await worker.message({ type: "navigation-state", destination }, {
+    tab: { id: 7, url: destination }
+  })).ok, false);
+  assert.equal(worker.session.size, 0);
+  const broken = harness(async url => htmlResponse(url), { storageFailure: true });
+  for (const message of [{ type: "navigation-state", destination }, { type: "navigation-state" }]) {
+    const result = await broken.message(message);
+    assert.equal(result.ok, false);
+    assert.match(result.message, /无法保存或恢复阅读状态/);
+  }
 });

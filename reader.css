@@ -18,6 +18,7 @@ button {
   padding: 6px 12px;
 }
 button:hover { background: #e9f3fa; }
+button:disabled { color: #6d7d88; background: #eef2f5; border-color: #cbd7df; cursor: not-allowed; }
 button:focus-visible, a:focus-visible, input:focus-visible, .pane:focus-visible {
   outline: 3px solid #0078d4;
   outline-offset: 2px;
@@ -66,6 +67,7 @@ a { color: #0067b8; text-decoration: underline; overflow-wrap: anywhere; }
   flex: 0 0 auto;
 }
 .toolbar strong { font-size: 18px; margin-right: auto; }
+.page-navigation { display: flex; gap: 8px; flex-shrink: 0; }
 .toolbar label { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
 input[type="checkbox"] { accent-color: #0067b8; width: 17px; height: 17px; }
 .status { margin: 0; padding: 6px 20px; color: #40596b; font-size: 13px; flex: 0 0 auto; }

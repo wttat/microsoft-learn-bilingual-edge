@@ -5,6 +5,7 @@ const Core = globalThis.LearnBilingualCore;
 const pending = new Map();
 const TIMEOUT = 20000;
 const MAX_BYTES = 6 * 1024 * 1024;
+const navigationKey = tabId => `reader-navigation:${tabId}`;
 
 function validateSender(message, sender) {
   if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0) {
@@ -18,10 +19,26 @@ function validateSender(message, sender) {
   }
   const pageURL = Core.pageKey(message.url);
   // sender.url stays at document creation after SPA navigation; tab.url is browser-supplied and current.
-  if (message.type === "load-pair" && Core.pageKey(sender.tab.url) !== pageURL) {
+  if (message.type !== "cancel-pair" && Core.pageKey(sender.tab.url) !== pageURL) {
     throw Core.fail("INVALID_MESSAGE", "文章请求与当前页面不符。");
   }
   return pageURL;
+}
+
+async function navigationState(message, tabId, pageURL) {
+  const key = navigationKey(tabId);
+  if (message.destination !== undefined) {
+    const destination = Core.normalizeURL(message.destination);
+    if (Core.localeOf(destination.href) !== Core.localeOf(pageURL) ||
+        Core.pageKey(destination.href) === pageURL) {
+      throw Core.fail("INVALID_DESTINATION", "跳转目标必须是同一语言下的另一篇 Learn 文章。");
+    }
+    await chrome.storage.session.set({ [key]: { url: Core.pageKey(destination.href), expires: Date.now() + 60000 } });
+    return { ok: true };
+  }
+  const stored = (await chrome.storage.session.get(key))[key];
+  if (stored) await chrome.storage.session.remove(key);
+  return { ok: true, resume: Boolean(stored && stored.url === pageURL && stored.expires > Date.now()) };
 }
 
 async function readHTML(response) {
@@ -94,7 +111,7 @@ async function fetchOfficial(value, parentSignal) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if (!message || !["load-pair", "cancel-pair"].includes(message.type)) return false;
+  if (!message || !["load-pair", "cancel-pair", "navigation-state"].includes(message.type)) return false;
   let pageURL;
   try {
     pageURL = validateSender(message, sender);
@@ -104,6 +121,13 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     return false;
   }
   const tabId = sender.tab.id;
+  if (message.type === "navigation-state") {
+    navigationState(message, tabId, pageURL).then(respond).catch(error => {
+      console.error("Learn 中英对照：页面导航状态处理失败", error);
+      respond({ ok: false, message: error.code ? error.message : "无法保存或恢复阅读状态，请重试。" });
+    });
+    return true;
+  }
   if (message.type === "cancel-pair") {
     const previous = pending.get(tabId);
     const cancelled = previous?.id === message.requestId && previous.url === pageURL;
@@ -130,6 +154,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 chrome.tabs.onRemoved.addListener(tabId => {
   pending.get(tabId)?.controller.abort();
   pending.delete(tabId);
+  chrome.storage.session.remove(navigationKey(tabId)).catch(error => {
+    console.warn("Learn 中英对照：清理标签页阅读状态失败", error);
+  });
 });
 
 chrome.action.onClicked.addListener(async tab => {
