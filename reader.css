@@ -23,18 +23,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, .pane:focus-visible 
   outline-offset: 2px;
 }
 a { color: #0067b8; text-decoration: underline; overflow-wrap: anywhere; }
-.launcher {
+.floating-control {
   position: fixed;
   bottom: 24px;
   right: 24px;
   z-index: 2147483647;
+}
+.launcher {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   max-width: min(420px, 90vw);
 }
-.launcher button { background: #0067b8; color: white; box-shadow: 0 3px 16px #0003; }
+.launcher button, button.floating-close { background: #0067b8; color: white; box-shadow: 0 3px 16px #0003; }
 .launcher p { background: white; color: #172b3a; border: 1px solid #96aebd; padding: 12px; border-radius: 6px; margin: 0; }
 .reader {
   position: fixed;

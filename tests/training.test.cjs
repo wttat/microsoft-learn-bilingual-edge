@@ -144,7 +144,7 @@ test("培训单元识别回归", { timeout: 180000 }, async t => {
         const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
         await fs.writeFile(path.join(process.env.ARTIFACTS_DIR, "learn-bilingual-training-fixed.png"), Buffer.from(screenshot.data, "base64"));
       }
-      await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+      await page.evaluate(`${SHADOW}.querySelector('[data-action="close"]').click()`);
       assert.equal((await readerState(page)).open, false);
       assert.ok(await page.evaluate('document.querySelector("#module-unit-content").textContent.length > 500'));
       await page.evaluate(`${SHADOW}.querySelector(".launcher button").click()`);

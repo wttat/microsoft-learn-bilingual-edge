@@ -39,7 +39,7 @@
     const stylesheet = element("link");
     stylesheet.rel = "stylesheet";
     stylesheet.href = chrome.runtime.getURL("reader.css");
-    const launcher = element("div", "launcher");
+    const launcher = element("div", "launcher floating-control");
     const notice = element("p");
     notice.hidden = true;
     notice.setAttribute("role", "status");
@@ -69,9 +69,11 @@
     const retry = element("button", "", "重新读取");
     retry.dataset.action = "reload";
     retry.addEventListener("click", () => loadPair());
-    const close = element("button", "", "收起 · 返回原页");
+    const close = element("button", "floating-control floating-close", "收起 · 返回原页");
+    close.dataset.action = "close";
+    close.title = "收起对照并返回原页（Esc）";
     close.addEventListener("click", closeReader);
-    toolbar.append(syncInput.label, autoInput.label, swap, retry, close);
+    toolbar.append(syncInput.label, autoInput.label, swap, retry);
     const message = element("p", "status");
     message.setAttribute("role", "status");
     const columns = element("div", "columns");
@@ -101,7 +103,7 @@
       columns.append(column);
       return { column, pane, original, url: "" };
     });
-    dialog.append(toolbar, message, columns);
+    dialog.append(toolbar, close, message, columns);
     dialog.addEventListener("cancel", event => {
       event.preventDefault();
       closeReader();
@@ -109,7 +111,7 @@
     shadow.append(stylesheet, launcher, dialog);
     document.documentElement.append(host);
     ui = {
-      host, shadow, dialog, launcher, notice, status: message, panes, columns, swap, syncInput, autoInput,
+      host, shadow, dialog, launcher, close, notice, status: message, panes, columns, swap, syncInput, autoInput,
       stylesReady: false, stylesFailed: false, wantsOpen: false
     };
     applyColumnOrder();
@@ -190,6 +192,8 @@
       return;
     }
     ui.wantsOpen = false;
+    ui.launcher.hidden = false;
+    const launcherRect = ui.launcher.getBoundingClientRect();
     savedPage = {
       x: window.scrollX, y: window.scrollY, focus: document.activeElement,
       styles: [document.documentElement, document.body].map(node => ({
@@ -198,6 +202,9 @@
       }))
     };
     savedPage.styles.forEach(({ node }) => node.style.setProperty("overflow", "hidden", "important"));
+    // Hiding page scrollbars changes the fixed-position viewport; keep the launcher's screen position.
+    ui.close.style.right = `${document.documentElement.clientWidth - launcherRect.right}px`;
+    ui.close.style.bottom = `${document.documentElement.clientHeight - launcherRect.bottom}px`;
     ui.notice.hidden = true;
     ui.launcher.hidden = true;
     ui.dialog.showModal();

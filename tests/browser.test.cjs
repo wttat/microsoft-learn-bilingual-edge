@@ -73,6 +73,34 @@ async function wheel(page, index, delta) {
   return snapshot(page);
 }
 
+async function floatingButton(page, selector) {
+  return page.evaluate(`(() => {
+    const root = ${SHADOW};
+    const button = root.querySelector(${JSON.stringify(selector)});
+    const rect = button.getBoundingClientRect();
+    const style = getComputedStyle(button.closest(".floating-control"));
+    return {
+      x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+      right: rect.right, bottom: rect.bottom,
+      rightGap: innerWidth - rect.right, bottomGap: innerHeight - rect.bottom,
+      position: style.position, cssRight: style.right, cssBottom: style.bottom,
+      inReader: root.querySelector("dialog").contains(button),
+      inToolbar: root.querySelector(".toolbar").contains(button),
+      clickable: root.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button
+    };
+  })()`);
+}
+
+async function clickFloating(page, selector) {
+  const rect = await floatingButton(page, selector);
+  for (const type of ["mousePressed", "mouseReleased"]) {
+    await page.send("Input.dispatchMouseEvent", {
+      type, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2,
+      button: "left", clickCount: 1
+    });
+  }
+}
+
 test("真实 Edge 扩展与官方文章端到端", { timeout: 240000 }, async t => {
   const edge = await launch(ROOT);
   const { page, browser } = edge;
@@ -190,24 +218,80 @@ test("真实 Edge 扩展与官方文章端到端", { timeout: 240000 }, async t 
     assertAligned(await snapshot(page));
   });
 
-  await t.test("收起恢复原网页的滚动位置与原有行内样式，并能重新打开", async () => {
-    await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+  await t.test("右下角悬浮收起与原页入口对齐，真实鼠标点击恢复原页并可重新打开", async subtest => {
+    subtest.after(async () => {
+      if (!(await snapshot(page)).opened) await clickFloating(page, ".launcher button");
+    });
+    const close = await floatingButton(page, '[data-action="close"]');
+    assert.equal(close.position, "fixed");
+    assert.ok(close.rightGap >= 24);
+    assert.ok(close.bottomGap >= 24);
+    assert.equal(close.inReader, true, "收起按钮必须在原生模态框内部才可操作");
+    assert.equal(close.inToolbar, false);
+    assert.equal(close.clickable, true);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: close.x + close.width / 2, y: close.y + close.height / 2 });
+    assert.deepEqual(await page.evaluate(`(() => {
+      const style = getComputedStyle(${SHADOW}.querySelector('[data-action="close"]'));
+      return [style.color, style.backgroundColor];
+    })()`), ["rgb(255, 255, 255)", "rgb(0, 103, 184)"], "鼠标悬停时应保留白字蓝底的可读性");
+    await wheel(page, 1, 350);
+    assert.deepEqual(await floatingButton(page, '[data-action="close"]'), close, "正文滚动不应移动悬浮按钮");
+    await clickFloating(page, '[data-action="close"]');
+    assert.equal((await snapshot(page)).opened, false);
+    const launcher = await floatingButton(page, ".launcher button");
+    assert.equal(launcher.position, "fixed");
+    assert.equal(launcher.rightGap, close.rightGap);
+    assert.equal(launcher.bottomGap, close.bottomGap);
+    assert.equal(launcher.right, close.right, "打开与收起入口应在同一右下角位置");
+    assert.equal(launcher.bottom, close.bottom);
+    assert.equal(launcher.clickable, true);
+    await page.evaluate(`(() => {
+      const root = ${SHADOW};
+      root.querySelector(".launcher").hidden = true;
+      root.querySelector(".launcher button").click();
+    })()`);
+    const initiallyHidden = await floatingButton(page, '[data-action="close"]');
+    assert.equal(initiallyHidden.right, close.right, "原入口临时隐藏时打开阅读器也不能把收起按钮移出屏幕");
+    assert.equal(initiallyHidden.bottom, close.bottom);
+    assert.equal(initiallyHidden.clickable, true);
+    await clickFloating(page, '[data-action="close"]');
     await page.evaluate(`document.documentElement.style.setProperty("overflow", "auto", "important");
       document.body.style.setProperty("overflow", "visible");
       window.scrollTo({ top: 750, behavior: "instant" });`);
     await delay(300);
     const before = await page.evaluate(`({ y: scrollY, html: document.documentElement.style.getPropertyValue("overflow"),
       priority: document.documentElement.style.getPropertyPriority("overflow"), body: document.body.style.overflow })`);
-    await page.evaluate(`${SHADOW}.querySelector(".launcher button").click()`);
+    await clickFloating(page, ".launcher button");
     assert.equal((await snapshot(page)).opened, true);
-    await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+    await clickFloating(page, '[data-action="close"]');
     await delay(300);
     const after = await page.evaluate(`({ y: scrollY, html: document.documentElement.style.getPropertyValue("overflow"),
       priority: document.documentElement.style.getPropertyPriority("overflow"), body: document.body.style.overflow })`);
     assert.deepEqual(after, before);
-    await page.evaluate(`${SHADOW}.querySelector(".launcher button").click()`);
+    await clickFloating(page, ".launcher button");
     assert.equal((await snapshot(page)).opened, true);
     assert.equal(await page.evaluate('document.querySelectorAll("#learn-bilingual-reader").length'), 1);
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 900, height: 700, deviceScaleFactor: 1, mobile: false });
+    await delay(200);
+    const resizedClose = await floatingButton(page, '[data-action="close"]');
+    assert.equal(resizedClose.rightGap, close.rightGap);
+    assert.equal(resizedClose.bottomGap, close.bottomGap);
+    await clickFloating(page, '[data-action="close"]');
+    const resizedLauncher = await floatingButton(page, ".launcher button");
+    assert.equal(resizedLauncher.right, resizedClose.right);
+    assert.equal(resizedLauncher.bottom, resizedClose.bottom);
+    await clickFloating(page, ".launcher button");
+    for (const type of ["keyDown", "keyUp"]) {
+      await page.send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    }
+    assert.equal((await snapshot(page)).opened, false);
+    await clickFloating(page, ".launcher button");
+    await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await delay(200);
+    if (process.env.ARTIFACTS_DIR) {
+      const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
+      await fs.writeFile(path.join(process.env.ARTIFACTS_DIR, "learn-bilingual-floating-close.png"), Buffer.from(screenshot.data, "base64"));
+    }
   });
 
   await t.test("真实扩展界面处理模拟 404、英文回退、同文回退及重试，陈旧结果不能覆盖新请求", async () => {
@@ -255,7 +339,7 @@ test("真实 Edge 扩展与官方文章端到端", { timeout: 240000 }, async t 
       await worker.evaluate('__mode = "slow"');
       await reload();
       await waitFor(() => worker.evaluate("__releases.length === 2"), "两个慢请求已发出");
-      await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+      await page.evaluate(`${SHADOW}.querySelector('[data-action="close"]').click()`);
       await worker.evaluate('__mode = "new"');
       await page.evaluate(`${SHADOW}.querySelector(".launcher button").click()`);
       await waitFor(async () => (await snapshot(page))?.panes[0].title === "新请求的官方中文标题", "新请求正文");

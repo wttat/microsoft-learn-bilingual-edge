@@ -56,7 +56,7 @@ test("培训单元导航和请求校验回归", { timeout: 180000 }, async t => 
   })()`);
 
   await t.test("通过官方模块菜单切换到总结，重试及前进后退均可读取", async () => {
-    await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+    await page.evaluate(`${SHADOW}.querySelector('[data-action="close"]').click()`);
     await page.evaluate('document.querySelector(\'button[aria-controls="module-menu"]\').click()');
     await delay(500);
     await waitFor(() => page.evaluate(`Boolean([...document.querySelectorAll("#module-menu a[href]")]
@@ -115,7 +115,7 @@ test("培训单元导航和请求校验回归", { timeout: 180000 }, async t => 
       ["中文", "英文"]);
     assert.equal(await page.evaluate(`Boolean(${SHADOW}.querySelector('[data-action="swap"]'))`), true);
 
-    await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+    await page.evaluate(`${SHADOW}.querySelector('[data-action="close"]').click()`);
     await page.evaluate('document.querySelector(\'button[aria-controls="module-menu"]\').click()');
     const intro = await waitFor(() => page.evaluate(`(() => {
       const link = [...document.querySelectorAll("#module-menu a[href]")].find(a =>
@@ -125,7 +125,7 @@ test("培训单元导航和请求校验回归", { timeout: 180000 }, async t => 
     await page.send("Page.navigate", { url: intro.url });
     await waitReading(page, intro.title);
     const before = await page.evaluate("performance.timeOrigin");
-    await page.evaluate(`${SHADOW}.querySelector(".toolbar").lastElementChild.click()`);
+    await page.evaluate(`${SHADOW}.querySelector('[data-action="close"]').click()`);
     await page.evaluate('document.querySelector(\'button[aria-controls="module-menu"]\').click()');
     await waitFor(() => page.evaluate(`Boolean([...document.querySelectorAll("#module-menu a[href]")]
       .find(a => a.href === ${JSON.stringify(spaceURL)} || a.href === ${JSON.stringify(spaceURL + "/")}))`),
