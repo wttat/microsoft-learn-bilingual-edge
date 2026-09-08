@@ -49,6 +49,62 @@
     return { main, title, bodies };
   }
 
+  function captureReadingProgress(pane) {
+    const article = pane.querySelector("article");
+    if (!article || !pane.clientHeight) return null;
+    const origin = pane.getBoundingClientRect().top;
+    return {
+      top: pane.scrollTop,
+      maximum: Math.max(0, pane.scrollHeight - pane.clientHeight),
+      anchors: [...article.querySelectorAll("h2[id], h3[id], h4[id], h5[id], h6[id]")]
+        .filter(heading => heading.getClientRects().length && heading.getBoundingClientRect().height > 0)
+        .map(heading => ({
+          id: heading.id,
+          top: heading.getBoundingClientRect().top - origin + pane.scrollTop - 16
+        }))
+    };
+  }
+
+  function originalScrollTop(progress, doc = document) {
+    const parts = articleParts(doc);
+    const win = doc.defaultView;
+    const scroller = doc.scrollingElement;
+    if (!parts || !win || !scroller || !parts.title.getClientRects().length) return null;
+    const bodies = parts.bodies.filter(body => body.getClientRects().length && body.getBoundingClientRect().height > 0);
+    if (!bodies.length) return null;
+    const titleRect = parts.title.getBoundingClientRect();
+    const center = (titleRect.left + titleRect.right) / 2;
+    let inset = 16;
+    const visited = new Set();
+    // Learn's unit menu stays above the article while the original page scrolls.
+    for (const nav of doc.querySelectorAll("main nav, main header, body > header")) {
+      for (let node = nav; node && node !== doc.body && !visited.has(node); node = node.parentElement) {
+        visited.add(node);
+        const style = win.getComputedStyle(node);
+        const top = parseFloat(style.top);
+        const rect = node.getBoundingClientRect();
+        if (["sticky", "fixed"].includes(style.position) && Number.isFinite(top) &&
+            rect.height > 0 && rect.height < win.innerHeight / 2 && rect.left <= center && rect.right >= center) {
+          inset = Math.max(inset, Math.max(0, top) + rect.height + 16);
+        }
+      }
+    }
+    const pageMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const start = Core.clamp(titleRect.top + win.scrollY - inset, pageMax);
+    const bottom = Math.max(...bodies.map(body => body.getBoundingClientRect().bottom + win.scrollY));
+    const end = Math.max(start, Core.clamp(bottom - scroller.clientHeight + 16, pageMax));
+    const anchors = bodies.flatMap(body =>
+      [...body.querySelectorAll("h2[id], h3[id], h4[id], h5[id], h6[id]")]
+        .filter(heading => !heading.closest(CHROME) && heading.getClientRects().length &&
+          heading.getBoundingClientRect().height > 0)
+        .map(heading => ({
+          id: heading.id,
+          top: heading.getBoundingClientRect().top + win.scrollY - inset - start
+        })));
+    const pairs = Core.anchorPairs(progress.anchors, anchors, progress.maximum, end - start);
+    return start + Core.mapScroll(progress.top, pairs);
+  }
+
   function navigationLink(element, current) {
     const href = element.getAttribute("href");
     if (!href || href.startsWith("#")) return null;
@@ -227,5 +283,7 @@
     };
   }
 
-  root.LearnBilingualArticle = { articleParts, pageNavigation, extractArticle, sanitizeNode };
+  root.LearnBilingualArticle = {
+    articleParts, captureReadingProgress, originalScrollTop, pageNavigation, extractArticle, sanitizeNode
+  };
 })(globalThis);

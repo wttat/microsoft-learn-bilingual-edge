@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Learn 官方中英对照",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "并排阅读 Microsoft Learn 官方中文和英文正文，按对应章节双向同步滚动。不翻译、不使用 AI。",
   "permissions": ["storage"],
   "host_permissions": ["https://learn.microsoft.com/*"],

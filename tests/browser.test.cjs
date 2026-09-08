@@ -259,13 +259,13 @@ test("真实 Edge 扩展与官方文章端到端", { timeout: 240000 }, async t 
       document.body.style.setProperty("overflow", "visible");
       window.scrollTo({ top: 750, behavior: "instant" });`);
     await delay(300);
-    const before = await page.evaluate(`({ y: scrollY, html: document.documentElement.style.getPropertyValue("overflow"),
+    const before = await page.evaluate(`({ html: document.documentElement.style.getPropertyValue("overflow"),
       priority: document.documentElement.style.getPropertyPriority("overflow"), body: document.body.style.overflow })`);
     await clickFloating(page, ".launcher button");
     assert.equal((await snapshot(page)).opened, true);
     await clickFloating(page, '[data-action="close"]');
     await delay(300);
-    const after = await page.evaluate(`({ y: scrollY, html: document.documentElement.style.getPropertyValue("overflow"),
+    const after = await page.evaluate(`({ html: document.documentElement.style.getPropertyValue("overflow"),
       priority: document.documentElement.style.getPropertyPriority("overflow"), body: document.body.style.overflow })`);
     assert.deepEqual(after, before);
     await clickFloating(page, ".launcher button");

@@ -9,6 +9,7 @@
   let settings = { ...defaults };
   let ui;
   let sync;
+  let lastActivePane = 0;
   let opened = false;
   let loaded = false;
   let generation = 0;
@@ -87,8 +88,8 @@
     retry.addEventListener("click", () => loadPair());
     const close = element("button", "floating-control floating-close", "收起 · 返回原页");
     close.dataset.action = "close";
-    close.title = "收起对照并返回原页（Esc）";
-    close.addEventListener("click", closeReader);
+    close.title = "按当前阅读进度返回原页（Esc）";
+    close.addEventListener("click", () => closeReader());
     toolbar.append(syncInput.label, autoInput.label, swap, retry);
     const message = element("p", "status");
     message.setAttribute("role", "status");
@@ -138,7 +139,7 @@
     stylesheet.addEventListener("error", () => {
       console.error("Learn 中英对照：阅读器样式加载失败");
       ui.stylesFailed = true;
-      closeReader();
+      closeReader({ followProgress: false });
       notice.textContent = "阅读器样式加载失败，请在扩展管理页重新加载扩展并刷新网页。";
       notice.hidden = false;
     });
@@ -276,6 +277,8 @@
     const launcherRect = ui.launcher.getBoundingClientRect();
     savedPage = {
       x: window.scrollX, y: window.scrollY, focus: document.activeElement,
+      url: location.href.split("#")[0],
+      title: Article.articleParts(document).title,
       styles: [document.documentElement, document.body].map(node => ({
         node, value: node.style.getPropertyValue("overflow"),
         priority: node.style.getPropertyPriority("overflow")
@@ -305,13 +308,22 @@
     });
   }
 
-  function closeReader() {
+  function closeReader({ followProgress = true } = {}) {
     if (ui) ui.wantsOpen = false;
     if (!opened) return;
+    const samePage = savedPage.url === location.href.split("#")[0] &&
+      Article.articleParts(document)?.title === savedPage.title;
+    let progress = null;
+    if (followProgress && samePage && loaded) {
+      const active = sync?.active ?? Core.LOCALES.indexOf(Core.localeOf(savedPage.url));
+      const pane = ui.panes[active].pane.querySelector("article")
+        ? ui.panes[active].pane
+        : ui.panes.find(entry => entry.pane.querySelector("article"))?.pane;
+      if (pane) progress = Article.captureReadingProgress(pane);
+    }
     opened = false;
     cancelRequest();
-    sync?.destroy();
-    sync = null;
+    disconnectSync();
     ui.dialog.close();
     ui.launcher.hidden = false;
     for (const { node, value, priority } of savedPage.styles) {
@@ -319,7 +331,14 @@
       else node.style.removeProperty("overflow");
     }
     savedPage.focus?.focus({ preventScroll: true });
-    window.scrollTo({ left: savedPage.x, top: savedPage.y, behavior: "instant" });
+    if (samePage) {
+      const top = progress ? Article.originalScrollTop(progress) : null;
+      if (progress && top === null) {
+        ui.notice.textContent = "原页正文已变化，无法定位对应进度，已返回打开前的位置。";
+        ui.notice.hidden = false;
+      }
+      window.scrollTo({ left: savedPage.x, top: top ?? savedPage.y, behavior: "instant" });
+    }
   }
 
   function showPaneMessage(index, title, text, retry = false) {
@@ -340,8 +359,7 @@
     cancelRequest();
     const current = generation;
     loaded = false;
-    sync?.destroy();
-    sync = null;
+    disconnectSync();
     const urls = Core.pairURLs(location.href);
     ui.panes.forEach((entry, index) => {
       entry.url = urls[Core.LOCALES[index]];
@@ -405,11 +423,18 @@
     }
   }
 
-  function connectSync() {
-    sync?.destroy();
+  function disconnectSync() {
+    if (!sync) return;
+    lastActivePane = sync.active;
+    sync.destroy();
     sync = null;
+  }
+
+  function connectSync() {
+    disconnectSync();
     if (ui.panes.every(({ pane }) => pane.querySelector("article"))) {
       sync = new globalThis.LearnBilingualSync(ui.panes.map(({ pane }) => pane), settings.sync);
+      sync.from(lastActivePane);
     }
   }
 
@@ -466,7 +491,7 @@
         if (opened) scrollHash(next.hash);
         return;
       }
-      closeReader();
+      closeReader({ followProgress: false });
       loaded = false;
       eligible = false;
       autoAttempted = false;

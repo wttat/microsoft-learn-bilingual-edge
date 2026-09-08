@@ -22,7 +22,7 @@ Microsoft Edge 插件，并排阅读 Microsoft Learn 官方中英文正文，支
 | 自动打开 | 控制进入文章时是否自动展开。 |
 | 打开官方原文 | 在新标签页打开对应语言页面。 |
 | 重新读取 | 刷新正文或重试失败请求。 |
-| 收起 · 返回原页 | 右下角悬浮按钮，恢复原页及滚动位置；也可按 Esc。 |
+| 收起 · 返回原页 | 右下角悬浮按钮，按当前阅读进度返回原页；也可按 Esc。同步关闭时跟随最后操作的正文栏，正文未加载则保留打开前的位置。 |
 
 收起后，点击原页右下角“中英对照”或扩展图标重新打开。同步、自动打开和左右顺序设置保存在本机。
 
@@ -40,7 +40,7 @@ Microsoft Edge 插件，并排阅读 Microsoft Learn 官方中英文正文，支
 
 ```powershell
 node --test tests\core.test.cjs tests\background.test.cjs
-node --test tests\browser.test.cjs tests\training.test.cjs tests\navigation.test.cjs
+node --test tests\browser.test.cjs tests\training.test.cjs tests\navigation.test.cjs tests\progress.test.cjs
 ```
 
 浏览器测试需要 Edge 和网络，使用独立临时配置。非标准安装路径可通过 `EDGE_PATH` 指定。

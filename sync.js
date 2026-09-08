@@ -18,9 +18,12 @@
           this.active = index;
           this.expected[index] = null;
         };
-        for (const type of ["wheel", "pointerdown", "touchstart", "keydown"]) {
+        for (const type of ["wheel", "pointerdown", "touchstart"]) {
           pane.addEventListener(type, intent, options);
         }
+        pane.addEventListener("keydown", event => {
+          if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) intent();
+        }, options);
         pane.addEventListener("scroll", () => {
           if (this.expected[index] !== null && Math.abs(pane.scrollTop - this.expected[index]) < 1.5) return;
           intent();
